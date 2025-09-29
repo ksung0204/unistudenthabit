@@ -1,0 +1,639 @@
+---
+title: "Statistical Analysis of Student Health and Academic Behaviors"
+author: "541006651"
+date: today
+bibliography: refs.bib
+link-citations: true
+format:
+  html:
+    toc: true
+    toc-float: true
+    number-sections: true   
+    code-fold: true
+    theme: default
+    df-print: default
+    html-math-method: katex
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+  fig-width: 8
+  fig-height: 6
+---
+
+```{r}
+#| code-fold: true
+#| code-summary: "Code"
+# Load required libraries
+library(tidyverse)
+library(gendercoder)
+library(janitor)
+library(hms)
+library(here)
+library(readxl)
+library(knitr)   # for tables
+
+library(scales)
+
+
+```
+
+```{r}
+#| eval: false
+knitr::write_bib(c(.packages(), "knitr", "rmarkdown"), "refs.bib")
+
+```
+
+# **INTRODUCTION**
+
+University students often balance study commitments with a wide range of lifestyle choices, from sleep and exercise habits to paid work and social activities. These behaviors can have important consequences for wellbeing and academic performance. Understanding how such factors interact provides valuable insight into the challenges and patterns faced by students in higher education.
+
+The motivation of this analysis is to explore how **lifestyle choices and demographic factors shape student wellbeing and academic outcomes**. y applying a set of appropriate statistical tests and simulations, this report seeks to capture the complex relationships between health behaviors and study patterns while demonstrating proper statistical methodology with attention to assumptions and effect sizes.
+
+## Data overview
+
+```{r}
+#| code-fold: true
+#| code-summary: "Code"
+theme_set(theme_bw())
+data <- readxl::read_excel("D:/USYD/data2002/assignment2/DATA2x02_survey_2025_Responses.xlsx")
+```
+
+The dataset used in this report comes from a voluntary survey of DATA2X02 students. Because participation was not random, the data are not a true random sample and may reflect **self-selection bias**. Moreover, only around 36% of students responded, which means results may not fully represent the entire population. In addition, variables such as sleep and study use rely on **self-reporting**, which is prone to recall error and social desirability bias. These limitations should be considered when interpreting the findings.
+
+```{r}
+#| code-fold: true
+#| code-summary: "Code"
+data_selected <- data %>%
+  select(
+    `How much alcohol do you consume each week?`,
+    `How consistent would you rate your sleep schedule?`,
+    `How many hours a week do you spend studying?`,
+    `How much sleep do you get (on avg, per day)?`,
+    `How often would you say you feel anxious on a daily basis?`,
+
+  ) %>%
+  rename(
+    average_daily_sleep=`How much sleep do you get (on avg, per day)?`,
+    weekly_alcohol = `How much alcohol do you consume each week?`,
+    weekly_study_hours=`How many hours a week do you spend studying?`,
+    daily_anxiety_frequence=`How often would you say you feel anxious on a daily basis?`,
+  )
+```
+
+```{r}
+#| code-fold: true
+#| code-summary: "Code"
+# Summary of selected variables
+selected_vars <- data_selected %>%
+  select(
+    average_daily_sleep,
+    weekly_alcohol,
+    weekly_study_hours,
+    daily_anxiety_frequence,
+  )
+
+# Missing data summary
+missing_selected <- selected_vars %>%
+  summarise_all(~sum(is.na(.))) %>%
+  pivot_longer(everything(),
+               names_to = "variable",
+               values_to = "missing_count")
+
+knitr::kable(missing_selected,
+             caption = "Missing Values in Selected Variables")
+
+```
+
+Some survey questions could also be refined for clarity and consistency. For instance, ensuring numeric formats for hours of study and sleep would reduce ambiguity, and providing clearer scales for variables such as exercise or alcohol consumption could generate more precise and useful data.
+
+## Data Wrangling
+
+The dataset was processed in **R** [@R-base] and imported from Excel using **readxl** [@R-readxl]. Core wrangling (select/rename variables, standardize sleep to numeric hours/day, convert weekly study hours to daily, remove missing/unrealistic values) used the **tidyverse** [@R-tidyverse] with additional cleaning from **janitor** [@R-janitor]. Tables/summaries were produced with **knitr** [@R-knitr] and the report rendered via **rmarkdown** [@R-rmarkdown]. QQ plots with confidence bands were generated using **qqplotr** [@R-qqplotr].
+
+# **RESULT:**
+
+## Are students equally distributed across alcohol consumption categories?
+
+### Data preparation
+
+-   Missing values in the alcohol variable were removed
+
+-   Responses were grouped into three categories: *Non-drinker* (students who reported not drinking alcohol), *Light drinker* (students consuming less than 5 standard drinks per week), and *Heavy drinker* (all higher levels of alcohol consumption)
+
+```{r}
+#| code-fold: true
+#| code-summary: "Code"
+
+alcohol_data <- data_selected$weekly_alcohol
+alcohol_data <- data.frame(alcohol_data) %>%
+  drop_na()
+alcohol_data <- alcohol_data %>%
+  rename(alcohol_raw = alcohol_data) %>%
+  mutate(
+    alcohol_group = case_when(
+      alcohol_raw == "I don't drink alcohol" ~ "Non-drinker",
+      alcohol_raw == "Less than 5 standard drinks" ~ "Light drinker",
+      TRUE ~ "Heavy drinker"
+    )
+  )
+
+ggplot(alcohol_data, aes(x = alcohol_group, fill = alcohol_group)) +
+  geom_bar(width = 0.6) +                                # không dùng stat="identity"
+  labs(title = "Alcohol Consumption Distribution",
+       x = "", y = "Count") +
+  theme_minimal()
+
+
+
+```
+
+### Hypothesis
+
+-   $H_{0}$: Students are equally distributed across alcohol consumption levels (uniform distribution)
+
+-   $H_{1}$: Students are not equally distributed across alcohol consumption levels
+
+```{r}
+#| code-fold: true
+#| code-summary: "Code"
+# Tính số nhóm và expected frequencies
+observed_alcohol <- table(alcohol_data$alcohol_group)
+n_categories <- length(observed_alcohol)
+expected_freq <- length(alcohol_data$alcohol_group) / n_categories
+
+# In ra màn hình
+cat("\nExpected frequency per category:", round(expected_freq, 1), "\n")
+
+# --- Barplot: Observed vs Expected ---
+library(tidyverse)
+
+plot_df <- tibble(
+  group = factor(names(observed_alcohol),
+                 levels = c("Non-drinker","Light drinker","Heavy drinker")),
+  observed = as.numeric(observed_alcohol),
+  expected = round(as.numeric(expected_freq), 1)  # làm tròn 1 chữ số thập phân
+) |>
+  pivot_longer(c(observed, expected), names_to = "type", values_to = "count")
+
+ggplot(plot_df, aes(x = group, y = count, fill = type)) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = count), position = position_dodge(width = 0.9),
+            vjust = -0.3, size = 3) +
+  labs(title = "Observed vs Expected (Uniform) — Alcohol Consumption Groups",
+       x = "Group", y = "Frequency", fill = "") +
+  theme_bw() +
+  theme(legend.position = "top")
+
+
+
+```
+
+### Assumption
+
+-   Students are sampled independently. (Each students do their own survey)
+
+-   The expected frequency in each category is at least 5 (here $E_i = `r round(expected_freq, 1)`$, $k = `r n_categories`$).
+
+```{r}
+#| code-fold: true
+#| code-summary: "Code"
+#Test statistic
+observed = as.numeric(observed_alcohol)
+expected = round(as.numeric(expected_freq), 1)
+chi_stat <- sum((observed - expected)^2 / expected)
+cat("Test statistic:", round(chi_stat, 3), "\n")
+# Chi-squared Goodness-of-Fit test
+gof_alcohol <- chisq.test(
+  observed_alcohol,
+  p = rep(1/n_categories, n_categories)  # giả thuyết: phân phối đều
+)
+print(gof_alcohol)
+```
+
+### Test Statistic
+
+$$
+T = \sum_{i=1}^k \frac{(O_i - E_i)^2}{E_i} \sim \chi^2_{`r n_categories - 1`}
+$$
+
+where $O_i$ are the observed counts and $E_i = `r round(expected_freq, 1)`$ are the expected counts under $H_0$.
+
+### Observed Test Statistic
+
+$t_0 = `r round(unname(gof_alcohol$statistic), 3)\`\$.
+
+### P-value
+
+$p$-value is \< 0.01
+
+### Decision
+
+-   We have very strong evidence to reject $H_{0}$, because the observed test statistic ($t_0 = `r round(unname(gof_alcohol$statistic), 2)\` ) is extremely large and the $p$-value is very small ($p$-value \< 0.01).
+
+-   Therefore, students are not equally distributed across alcohol consumption categories.\
+    The majority of students belong to the *Non-drinker* group, while the least common group is the *Heavy drinker* group.. \### Limitation
+
+-   **Categorization choice**: The grouping into *Non-drinker*, *Light drinker*, and *Heavy drinker* was based on pragmatic cut-offs. Different thresholds could change the outcome.
+
+-   Responses may not be completely independent, since students could be influenced by peers when answering.
+
+## Is there a difference between the number of hours that students spend sleeping and studying per day?
+
+### Data Preparation:
+
+-   Sleeping hours per day column is normalized to a consistent numeric format
+
+-   Weekly study hours column is converted into daily values dividing by seven
+
+-   A new column (represents the difference of daily sleep hours and daily study hours) is created, and rows with missing values were removed
+
+-   Any unrelated answer will be seem as NULL
+
+-   Unrealistic values, such as sleep below three hours per day and study loads of 170 hours per week, were excluded to ensure data integrity.
+
+```{r}
+#| code-fold: true
+#| code-summary: "Code"
+library(dplyr)
+
+
+clean_sleep_hours_per_day <- function(x) {
+  s <- tolower(as.character(x))
+  s <- str_squish(s)
+  s <- str_replace_all(s, "[–—−]", "-")     # en/em dash -> "-"
+  s <- str_replace_all(s, "\\bto\\b", "-")  # "to" -> "-"
+  s <- str_replace_all(s, "~", "-")         # "~" -> "-"
+
+  # Ngoại lệ giữ "Eight Hours" -> 8
+  s <- ifelse(s %in% c("eight hours", "8 hours"), "8", s)
+
+  # 1) seconds -> hours (vd 28800 hay "28800 seconds")
+  num_raw <- suppressWarnings(as.numeric(s))
+  is_seconds_num <- !is.na(num_raw) & num_raw >= 3600 & (num_raw %% 60 == 0)
+  is_seconds_txt <- str_detect(s, "\\bsec(ond|onds)?\\b")
+  num <- ifelse(is_seconds_num | is_seconds_txt, parse_number(s) / 3600, NA_real_)
+
+  # 2) khoảng "a-b" -> (a+b)/2
+  has_range <- str_detect(s, "\\d+(?:\\.\\d+)?\\s*-\\s*\\d+(?:\\.\\d+)?")
+  has_range[is.na(has_range)] <- FALSE
+  if (any(has_range, na.rm = TRUE)) {
+    m <- str_match(s[has_range], "(\\d+(?:\\.\\d+)?)\\s*-\\s*(\\d+(?:\\.\\d+)?)")
+    a <- as.numeric(m[, 2]); b <- as.numeric(m[, 3])
+    num[has_range] <- (a + b) / 2
+  }
+
+  # 3) các dạng còn lại: "9h", "9hrs", "9 hours", "9.0" -> 9
+  need_simple <- is.na(num)
+  if (any(need_simple)) {
+    num[need_simple] <- parse_number(s[need_simple])
+  }
+  
+
+  # 4) lọc giá trị không hợp lý cho GIỜ / NGÀY (0..24)
+  num[num < 0 | num > 24] <- NA_real_
+
+  num
+}
+# Áp dụng cho cột average_daily_sleep (giờ/ngày)
+data_selected <- data_selected %>%
+  filter(tolower(average_daily_sleep) != "good") %>%
+  mutate(sleep_clean_hours_per_day = clean_sleep_hours_per_day(average_daily_sleep))
+
+
+
+```
+
+```{r}
+#| code-fold: true
+#| code-summary: "Code"
+# Bỏ NA ở cả 2 biến
+df_clean <- data_selected %>%
+  select(sleep_clean_hours_per_day, weekly_study_hours) %>%
+  drop_na() %>%
+  filter(
+  sleep_clean_hours_per_day >= 3,
+  weekly_study_hours != 170,
+  weekly_study_hours >=7) %>%
+  mutate(study_hours_per_day = weekly_study_hours / 7)
+
+# Tính trung bình
+avg_df <- tibble(
+  activity = c("Sleep", "Study"),
+  avg_hours = c(mean(df_clean$sleep_clean_hours_per_day),
+                mean(df_clean$study_hours_per_day))
+)
+
+# Vẽ bar chart
+ggplot(avg_df, aes(x = activity, y = avg_hours, fill = activity)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = sprintf("%.1f", avg_hours)),
+            vjust = 1.5, color = "white", size = 5) +
+  labs(title = "Average Daily Sleep vs Study Hours",
+       x = "Activity", y = "Average Hours per Day") +
+  theme_minimal() + theme(legend.position = "none")
+
+```
+
+```{r}
+#| code-fold: true
+#| code-summary: "Code"
+sleep_raw <- df_clean$sleep_clean_hours_per_day
+study_raw <- df_clean$study_hours_per_day
+diff_raw <- sleep_raw-study_raw
+n_diff    <- sum(!is.na(diff_raw))
+mean_diff <- mean(diff_raw, na.rm = TRUE)
+sd_diff   <- sd(diff_raw,   na.rm = TRUE)
+```
+
+### Hypothesis
+
+-   $H_{0}$: $\mu_d=0$ The mean difference between students' daily sleep hours and daily study hours is equal to zero.
+-   $H_{1}$: $\mu_d\neq 0$ The mean difference between students' daily sleep hours and daily study hours is not equal to zero.
+
+```{r}
+#| code-fold: true
+#| code-summary: "Code"
+
+
+result <- t.test(diff_raw, mu = 0, alternative = "two.sided")
+result
+```
+
+```{r}
+#| code-fold: true
+#| code-summary: "Code"
+t_stat <- result$statistic      # observed t-value
+df     <- result$parameter      # degrees of freedom
+p_val  <- result$p.value        # p-value
+
+x_range <- seq(-10, 50, length.out = 1000)
+y_density <- dt(x_range, df = df)
+
+plot(x_range, y_density, type = "l", lwd = 2,
+     main = paste("Probability density function for T - t(", df, ")", sep = ""),
+     xlab = "t-value", ylab = "Density",
+     xlim = c(-10, 50), ylim = c(0, max(y_density) * 1.1))
+
+t_crit <- qt(0.975, df = df)
+
+
+x_left <- seq(-10, -t_crit, length.out = 100)
+y_left <- dt(x_left, df = df)
+polygon(c(x_left, rev(x_left)), c(y_left, rep(0, length(y_left))),
+        col = "red", border = NA, density = 20)
+
+
+x_right <- seq(t_crit, 50, length.out = 200)
+y_right <- dt(x_right, df = df)
+polygon(c(x_right, rev(x_right)), c(y_right, rep(0, length(y_right))),
+        col = "red", border = NA, density = 20)
+
+
+abline(v = c(-t_crit, t_crit), lty = 2, col = "red", lwd = 2)
+
+
+abline(v = t_stat, col = "blue", lwd = 3)
+
+
+text(-t_crit, max(y_density) * 0.8, paste("-", round(t_crit, 3)), pos = 2, col = "red")
+text(t_crit,  max(y_density) * 0.8, round(t_crit, 3), pos = 4, col = "red")
+text(t_stat, max(y_density) * 0.9, paste("t =", round(t_stat, 3)), col = "blue", pos = 4)
+
+
+mtext(paste("p-value <", format.pval(p_val, digits = 3)), side = 3, line = 0.5)
+
+
+```
+
+### Assumptions
+
+-   Each observation $d_1, d_2, \dots, d_n$ (where $d_i = \text{sleep}_i - \text{study}_i$) is chosen at random from the population.
+
+-   The random variables $d_i$ are assumed to be **iid** (independent and identically distributed).
+
+-   The distribution of differences is approximately normal. Although the QQ-plot and boxplot suggest some deviations from normality and the presence of a few outliers,\
+    the **Central Limit Theorem (CLT)** ensures that with a large sample size ($n = `r n_diff`$), the sampling distribution of the mean difference is approximately normal, making the test valid and robust.
+
+```{r}
+#| code-fold: true
+#| code-summary: "Code"
+
+library(ggplot2)
+library(patchwork)
+
+library(qqplotr)
+
+p1 <- ggplot(data.frame(diff_raw), aes(sample = diff_raw)) +
+  stat_qq_band(distribution = "norm", conf = 0.95, 
+               fill = "skyblue", alpha = 0.3) +   # dải CI xanh nhạt
+  stat_qq_line(color = "red", size = 1) +         # đường thẳng đỏ đậm
+  stat_qq_point(color = "black", size = 2, alpha = 0.7) + # điểm đen to hơn
+  ggtitle("QQ-plot of differences (sleep - study)") +
+  theme_bw()
+
+
+p2 <- ggplot(data.frame(diff_raw), aes(y = diff_raw)) +
+  geom_boxplot(fill = "lightblue", color = "darkblue") +
+  ylab("Difference (hours per week)") +
+  ggtitle("Boxplot of differences (sleep - study)")
+
+p1 + p2
+
+
+```
+
+### Test statistic
+
+$$
+T = \frac{\bar{d} - \mu_0}{s / \sqrt{n}} \quad \sim \; t_{n-1} \;\; \text{under } H_0
+$$
+
+where:\
+- $\bar{d} = `r round(mean_diff, 2)`$ (sample mean difference)\
+- $\mu_0 = 0$ (hypothesized mean difference)\
+- $s = `r round(sd_diff, 2)`$\
+- $n = `r n_diff`$ (sample size)\
+- $n - 1 = `r n_diff - 1`$ (degrees of freedom)
+
+```{r}
+#| code-fold: true
+#| code-summary: "Code"
+
+mean_sleep <- mean(sleep_raw, na.rm = TRUE)
+sd_sleep   <- sd(sleep_raw, na.rm = TRUE)
+
+mean_study <- mean(study_raw, na.rm = TRUE)
+sd_study   <- sd(study_raw, na.rm = TRUE)
+
+mean_diff  <- mean(diff_raw, na.rm = TRUE)
+sd_diff    <- sd(diff_raw, na.rm = TRUE)
+
+# Tạo data frame để hiển thị thành bảng
+summary_table <- data.frame(
+  Variable = c("Sleep (hours)", "Study (hours)", "Difference"),
+  Mean     = c(mean_sleep, mean_study, mean_diff),
+  SD       = c(sd_sleep, sd_study, sd_diff)
+)
+
+# In bảng
+knitr::kable(summary_table, caption = "Summary Statistics for Sleep, Study, and Their Difference")
+
+```
+
+### Observed test statistic:
+
+-   $$t_0 = \frac{\bar d - \mu_0}{s/\sqrt{n}}
+         = \frac{`r round(mean_diff, 3)` - 0}{`r round(sd_diff, 3)` / \sqrt{`r n_diff`}}
+         = `r round(unname(t_stat), 3)`
+    $$
+
+### P-value
+
+-   $p$-value is \< 0.01
+
+### Decision:
+
+-   Reject $H_0$ in favour of $H_1$, since $|t_0| = `r round(unname(t_stat), 3)`$ exceeds the two-sided critical value $t_{0.975,\,`r df`} \approx `r round(qt(0.975, df), 3)`$ (equivalently, $p$-value is \< 0.01 $< \alpha = 0.05$).
+
+-   The data provide very strong evidence that the mean difference is not zero; on average, students sleep more than they study per day by about $\bar d \approx `r round(mean_diff, 2)`$ hours.
+
+### Limitation
+
+-   Removal of implausible values (\<3 hours of sleep/day) was necessary but subjective.
+
+-   Some outliers remain when checking normality.
+
+-   survey responses may not be fully independent, as students could influence each other’s answers.
+
+## Are paid work hours independent of study hours?
+
+### Data preparation:
+
+-   Rows with missing values in either *weekly paid work hours* or *weekly study hours* were removed.
+
+-   Weekly paid work hours were grouped into four categories: **0**, **1–10**, **11–20**, and **\>20 hours**.
+
+-   Weekly study hours were grouped into four categories: **\<5**, **5–15**, **16–30**, and **\>30 hours**.
+
+```{r}
+#| code-fold: true
+#| code-summary: "Code"
+
+### Research Question: Are paid work hours independent of study hours?
+
+work_raw  <- data$`How many hours a week (on average) do you work in paid employment?`
+study_raw <- data$`How many hours a week do you spend studying?`
+
+to_num <- function(x) suppressWarnings(
+  as.numeric(sub(".*?(-?\\d+\\.?\\d*).*", "\\1", as.character(x)))
+)
+
+work  <- to_num(work_raw)
+study <- to_num(study_raw)
+
+df <- na.omit(data.frame(work = work, study = study))
+
+df$work_cat <- cut(
+  df$work,
+  breaks = c(-0.1, 0, 10, 20, Inf),
+  labels = c("0", "1-10", "11-20", ">20"),
+  right  = TRUE
+)
+df$work_cat <- factor(df$work_cat, levels = c("0","1-10","11-20",">20"))
+
+df$study_cat <- cut(
+  df$study,
+  breaks = c(-0.1, 5, 15, 30, Inf),
+  labels = c("<5","5-15","16-30",">30"),
+  right  = TRUE
+)
+df$study_cat <- factor(df$study_cat, levels = c("<5","5-15","16-30",">30"))
+
+# ---- Contingency Table ----
+tbl1 <- table(df$work_cat, df$study_cat)
+```
+
+### Hypothesis:
+
+-   $H_{0}$: Paid work hours and study hours are independent
+
+-   $H_{0}$: Paid work hours and study hours are independent
+
+### Assumption:
+
+-   Each student’s response is an independent observation.
+
+```{r}
+#| code-fold: true
+#| code-summary: "Code"
+
+
+# Monte Carlo Chi-squared test (dùng bảng KHÔNG có Total)
+set.seed(123)
+chi_mc <- chisq.test(tbl1, simulate.p.value = TRUE, B = 20000)
+chi_mc
+
+tbl1_tot <- addmargins(tbl1)
+rownames(tbl1_tot)[nrow(tbl1_tot)] <- "Total"
+colnames(tbl1_tot)[ncol(tbl1_tot)] <- "Total"
+
+knitr::kable(
+  tbl1_tot,
+  caption = "Contingency Table: Paid Work Hours × Study Hours per Week",
+  align   = "r"
+)
+
+
+
+
+
+```
+
+### Test Statistic**:**
+
+-   $t_0 = `r round(chi_mc$statistic, 3)\`\$.
+
+### P-value**:**
+
+-   $p$-value $= `r round(chi_mc$p.value, 4)\`\$.
+
+### Decision:
+
+-   Reject $H_{0}$ in favour of $H_{1}$, since Test statistic = `r round(unname(chi_mc$statistic), 3)` with Monte Carlo $p$-value = `r round(chi_mc$p.value, 4)` $< 0.05$.
+-   This provides evidence that **paid work hours and study hours are not independent**. In other words, the distribution of study hours differs significantly across groups of students with different levels of paid work hours.
+
+```{r}
+#| code-fold: true
+#| code-summary: "Code"
+
+df$work_cat  <- factor(df$work_cat,  levels = c("0","1-10","11-20",">20"))
+df$study_cat <- factor(df$study_cat, levels = c("<5","5-15","16-30",">30"))
+
+ggplot(df, aes(x = work_cat, fill = study_cat)) +
+  geom_bar(position = "fill", width = 0.7) +
+  scale_y_continuous(labels = percent_format()) +
+  labs(
+    title = "Distribution of Study Hours within each Paid Work Group",
+    x = "Paid work hours", y = "Proportion", fill = "Study hours"
+  ) +
+  theme_minimal()
+
+
+
+```
+
+From the chart, we can see that students who work **more than 20 hours per week** are much more likely to study **less than 5 hours**, indicating that heavy work commitments often coincide with very limited study time. In contrast, students with **little or no paid work** rarely fall into the “\<5 hours” study category, and the majority of them study **between 5 and 30 hours**
+
+### Limitation:
+
+-   This assumption may not fully hold because students completing the survey could influence each other’s responses.
+
+# **CONCLUSION**
+
+Most students in the sample are **non-drinkers or light drinkers**, a positive indicator that avoids the health and academic risks of heavy alcohol use. The average student also reports **about 7.5 hours of sleep per night** and **around 3.1 hours of study per day**, which reflects a healthy balance between rest and learning. However, the tests also revealed that students who **work longer hours in paid employment tend to study less**, showing the clear trade-off between work commitments and academic time.
+
+Taken together, these findings suggest that the majority of students maintain habits supportive of wellbeing and performance, but those with heavier work schedules may face greater challenges in sustaining adequate study, highlighting an area where support and guidance could be valuable. These results are broadly consistent with prior evidence: U.S. national statistics report similar patterns in time allocation for study and sleep among college students [@BLS2007], and research has shown that heavy alcohol use can undermine both mental health and academic achievement [@Karam2017].
+
+# **REFERENCES**
